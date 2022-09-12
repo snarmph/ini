@@ -12,7 +12,7 @@
         parser simply keeps adding to the tables list, it wastes memory
         but it is also much faster, especially for bigger files.
         if you want the parser to merge all the tables together use the
-        following options:
+        following option:
          - merge_duplicate_tables
         when adding keys, if a table has two same keys, the parser
         adds it to the table anyway, meaning that when it searches for the
