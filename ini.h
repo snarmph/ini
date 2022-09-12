@@ -7,6 +7,22 @@
     license:
         see end of file
 
+    options:
+        by default, when there are multiple tables with the same name, the
+        parser simply keeps adding to the tables list, it wastes memory
+        but it is also much faster, especially for bigger files.
+        if you want the parser to merge all the tables together use the
+        following options:
+         - merge_duplicate_tables
+        when adding keys, if a table has two same keys, the parser
+        adds it to the table anyway, meaning that when it searches for the
+        key with ini_get it will get the first one but it will still have
+        both in table.values, to override this behaviour and only keep the
+        last value use:
+         - override_duplicate_keys
+        the default key/value divider is '=', if you want to change is use
+         - key_value_divider
+
     usage:
     - simple file:
         ini_t ini = ini_parse("file.ini", NULL);
@@ -87,9 +103,9 @@ typedef struct {
 } ini_t;
 
 typedef struct {
-    bool merge_duplicate_tables; // default: false
-    bool merge_duplicate_keys;   // default: false
-    char key_value_divider;      // default: =
+    bool merge_duplicate_tables;  // default: false
+    bool override_duplicate_keys; // default: false
+    char key_value_divider;       // default: =
 } iniopts_t;
 
 #define INI_ROOT NULL
@@ -156,7 +172,7 @@ inline static void _ini_vec_grow_impl(void **arr, uint32_t increment, uint32_t i
 
 static const iniopts_t __ini_default_opts = {
     false, // merge_duplicate_tables
-    false, // merge_duplicate_keys
+    false, // override_duplicate_keys
     '=',   // key_value_divider
 };
 
@@ -344,8 +360,8 @@ static iniopts_t __ini_set_default_opts(const iniopts_t *options) {
 
     iniopts_t opts = __ini_default_opts;
 
-    if (options->merge_duplicate_keys)
-        opts.merge_duplicate_keys = options->merge_duplicate_keys;
+    if (options->override_duplicate_keys)
+        opts.override_duplicate_keys = options->override_duplicate_keys;
 
     if (options->merge_duplicate_tables)
         opts.merge_duplicate_tables = options->merge_duplicate_tables;
@@ -423,12 +439,12 @@ static void __ini_add_value(initable_t *table, __ini_istream_t *in, const iniopt
 
     // value might be until EOF, in that case no use in skipping
     if (!__istr_is_finished(in)) __istr_skip(in); // skip \n
-    inivalue_t *new_val = options->merge_duplicate_keys ? __ini_find_value(table, key) : NULL;
-    if (!new_val) {
-        ivec_push(table->values, CDECL(inivalue_t){ key, val });
+    inivalue_t *new_val = options->override_duplicate_keys ? __ini_find_value(table, key) : NULL;
+    if (new_val) {
+        new_val->value = val;
     }
     else {
-        new_val->value = val;
+        ivec_push(table->values, CDECL(inivalue_t){ key, val });
     }
 }
 

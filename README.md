@@ -11,6 +11,25 @@ In just one c/c++ file do this:
 
 In every other file you can simply include ini.h
 
+## Options
+
+- merge_duplicate_tables:
+
+    By default, when there are multiple tables with the same name, the
+    parser simply keeps adding to the tables list, it wastes memory
+    but it is also much faster, especially for bigger files.
+    if you want the parser to merge all the tables together use this option
+- override_duplicate_keys:
+
+    when adding keys, if a table has two same keys, the parser
+    adds it to the table anyway, meaning that when it searches for the
+    key with ini_get it will get the first one but it will still have
+    both in table.values, to override this behaviour and only keep the
+    last value use this option
+- key_value_divider:
+
+    the default key/value divider is '=', if you want to change it use this option
+
 ## Simple example
 
 From file:
