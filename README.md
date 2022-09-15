@@ -36,13 +36,13 @@ From file:
 ```c
 ini_t ini = ini_parse("file.ini", NULL);
 
-char *name = ini_dup(ini_get(ini_get_table(&ini, INI_ROOT), "name"));
+char *name = ini_as_str(ini_get(ini_get_table(&ini, INI_ROOT), "name"), false);
 
 initable_t *server = ini_get_table(&ini, "server");
 int port = (int)ini_as_int(ini_get(server, "port"));
 bool use_threads = ini_as_bool(ini_get(server, "use threads"));
 
-ini_free(ini);
+ini_free(&ini);
 free(name);
 ```
 
@@ -52,15 +52,21 @@ const char *ini_str =
     "name : web-server\n"
     "[server]\n"
     "port : 8080\n"
+    "ip : localhost\n"
     "use threads : false";
 ini_t ini = ini_parse_str(ini_str, &(iniopts_t){ .key_value_divider = ':' });
 
-char *name = ini_dup(ini_get(ini_get_table(&ini, INI_ROOT), "name"));
+char *name = ini_as_str(ini_get(ini_get_table(&ini, INI_ROOT), "name"), false);
 
 initable_t *server = ini_get_table(&ini, "server");
 int port = (int)ini_as_int(ini_get(server, "port"));
 bool use_threads = ini_as_bool(ini_get(server, "use threads"));
+char ip[64];
+int iplen = ini_to_str(ini_get(server, "ip"), ip, sizeof(ip), false);
+if (iplen < 0) {
+    printf("(err) couldn't get ip: %s\n", ini_explain(iplen));
+}
 
-ini_free(ini);
 free(name);
+ini_free(&ini);
 ```
