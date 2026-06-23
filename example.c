@@ -3,7 +3,7 @@
 
 void print_vec(inivec_t(inistrv_t) vec) {
     printf("[ ");
-    for (inistrv_t *v = vec; v != ivec_end(vec); ++v) {
+    ivec_foreach(inistrv_t, v, vec) {
         printf("%.*s, ", (int)v->len, v->buf);
     }
     printf("]\n");
@@ -21,11 +21,21 @@ bool write_to_buf(const inivalue_t *val, char *buf, size_t buflen) {
     return true;
 }
 
-int main() {
-    ini_t ini = ini_parse("example.ini", NULL);
-    for (initable_t *tab = ini.tables; tab != ivec_end(ini.tables); ++tab) {
+int main(int argc, char **argv) {
+    const char *file = "example.ini";
+    if (argc > 1) {
+        file = argv[1];
+    }
+
+    ini_t ini = ini_parse(file, NULL);
+    if (ini.error) {
+        printf("ini file %s failed to parse: %s\n", file, ini_explain(ini.error));
+        return 1;
+    }
+    
+    ivec_foreach(initable_t, tab, ini.tables) {
         printf("%.*s\n", (int)tab->name.len, tab->name.buf);
-        for (inivalue_t *val = tab->values; val != ivec_end(tab->values); ++val) {
+        ivec_foreach(inivalue_t, val, tab->values) {
             printf("\t(%.*s) = (%.*s)\n",
                 (int)val->key.len, val->key.buf,
                 (int)val->value.len, val->value.buf);
@@ -57,7 +67,7 @@ int main() {
     inivalue_t *err_val = ini_get(err_tab, "non-existent");
     printf("tab: %p, val: %p\n", err_tab, err_val);
 
-    char hello[32], too_small[3];
+    char hello[32] = {0}, too_small[3] = {0};
     printf("hello -> ");
     write_to_buf(ini_get(tab, "hello"), hello, sizeof(hello));
     printf("too-small -> ");

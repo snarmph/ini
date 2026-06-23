@@ -26,6 +26,7 @@
     usage:
     - simple file:
         ini_t ini = ini_parse("file.ini", NULL);
+        if (ini.error) { printf("ini failed to parse: %s\n", ini_explain(ini.error)); }
 
         char *name = ini_as_str(ini_get(ini_get_table(&ini, INI_ROOT), "name"), false);
 
@@ -44,6 +45,7 @@
             "ip : localhost\n"
             "use threads : false";
         ini_t ini = ini_parse_str(ini_str, &(iniopts_t){ .key_value_divider = ':' });
+        if (ini.error) { printf("ini failed to parse: %s\n", ini_explain(ini.error)); }
 
         char *name = ini_as_str(ini_get(ini_get_table(&ini, INI_ROOT), "name"), false);
 
@@ -65,8 +67,6 @@
 
 #define _CRT_SECURE_NO_WARNINGS
 #include <stdbool.h>
-#include <limits.h>
-#include <stdint.h> // SIZE_MAX
 #include <stddef.h>
 #include <stdio.h>
 
@@ -90,6 +90,19 @@
 #define ivec_clear(vec)                 ((vec) ? ini__vec_len(vec) = 0 : 0)
 #define ivec_pop(vec)                   ((vec)[--ini__vec_len(vec)])
 
+#define ivec_foreach(T, it, vec) for (T *it = (vec), *__end = ivec_end(vec); it != __end; ++it)
+
+typedef enum {
+    INI_OK,
+    INI_NO_FILENAME,
+    INI_OPEN_ERROR,
+    INI_FAILED_READ,
+    INI_INVALID_STRING,
+    INI_INVALID_BUFFER,
+    INI_INVALID_ARGS,
+    INI_BUFFER_TOO_SMALL,
+} inierr_t;
+
 typedef struct {
     const char *buf;
     size_t len;
@@ -106,6 +119,7 @@ typedef struct {
 } initable_t;
 
 typedef struct {
+    inierr_t error;
     char *text;
     inivec_t(initable_t) tables;
 } ini_t;
@@ -115,12 +129,6 @@ typedef struct {
     bool override_duplicate_keys; // default: false
     char key_value_divider;       // default: =
 } iniopts_t;
-
-typedef enum {
-    INI_NO_ERR = 0,
-    INI_INVALID_ARGS = -1,
-    INI_BUFFER_TOO_SMALL = -2,
-} inierr_t;
 
 #define INI_ROOT NULL
 
@@ -168,13 +176,14 @@ const char *ini_explain(inierr_t error);
 #endif
 
 #ifdef INI_IMPLEMENTATION
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
 #include <assert.h>
 #include <ctype.h>
+#include <stdint.h>
+#include <limits.h>
 
 #ifdef __cplusplus
 #define CDECL(type) type
@@ -238,38 +247,61 @@ static inistrv_t strv__sub(inistrv_t view, size_t from, size_t to);
 static bool strv__is_empty(inistrv_t view);
 static int strv__cmp(inistrv_t a, inistrv_t b);
 
+#define INI_ERR(err) CDECL(ini_t){err}
+
 ini_t ini_parse(const char *filename, const iniopts_t *options) {
-    if (!filename) return CDECL(ini_t){0};
+    if (!filename) {
+        return INI_ERR(INI_NO_FILENAME);
+    }
     FILE *fp = fopen(filename, "rb");
+
+    if (!fp) {
+        return INI_ERR(INI_OPEN_ERROR);
+    }
+
     size_t filelen = 0;
     char *file_data = ini__read_whole_file(fp, &filelen);
     fclose(fp);
+
+    if (!file_data) {
+        return INI_ERR(INI_FAILED_READ);
+    }
+
     return ini__parse_internal(file_data, filelen, options);
 }
 
 ini_t ini_parse_str(const char *ini_str, const iniopts_t *options) {
+    if (!ini_str) {
+        return INI_ERR(INI_INVALID_STRING);
+    }
     size_t ini_str_len = strlen(ini_str);
     return ini__parse_internal(ini__strdup(ini_str, ini_str_len), ini_str_len, options);
 }
 
 ini_t ini_parse_buf(const char *buf, size_t buflen, const iniopts_t *options) {
+    if (!buf) {
+        return INI_ERR(INI_INVALID_BUFFER);
+    }
     return ini__parse_internal(ini__strdup(buf, buflen), buflen, options);
 }
 
 ini_t ini_parse_fp(FILE *fp, const iniopts_t *options) {
     size_t filelen = 0;
     char *file_data = ini__read_whole_file(fp, &filelen);
+    if (!file_data) {
+        return INI_ERR(INI_FAILED_READ);
+    }
     return ini__parse_internal(file_data, filelen, options);
 }
 
 bool ini_is_valid(ini_t *ctx) {
-    return ctx && ctx->text != NULL;
+    return ctx && ctx->error == INI_OK;
 }
 
 void ini_free(ini_t *ctx) {
     if (!ctx) return;
     free(ctx->text);
-    for (initable_t *tab = ctx->tables; tab != ivec_end(ctx->tables); ++tab) {
+    ivec_foreach(initable_t, tab, ctx->tables) {
         ivec_free(tab->values);
     }
     ivec_free(ctx->tables);
@@ -407,16 +439,20 @@ inierr_t ini_to_str(const inivalue_t *value, char *buf, size_t buflen, bool remo
 
 const char *ini_explain(inierr_t error) {
     switch (error) {
-        case INI_NO_ERR:           return "no error";
+        case INI_OK:               return "ok";
+        case INI_NO_FILENAME:      return "no filename was passed";
+        case INI_OPEN_ERROR:       return "failed to open the file";
+        case INI_FAILED_READ:      return "failed to read the file";
+        case INI_INVALID_STRING:   return "an invalid string was passed";
+        case INI_INVALID_BUFFER:   return "an invalid buffer was passed";
         case INI_INVALID_ARGS:     return "invalid arguments";
-        case INI_BUFFER_TOO_SMALL: return "buffer too small";
+        case INI_BUFFER_TOO_SMALL: return "the buffer was too small";
     }
     return "unknown";
 }
 
 static ini_t ini__parse_internal(char *text, size_t textlen, const iniopts_t *options) {
-    ini_t ini = { text, NULL };
-    if (!text) return ini;
+    ini_t ini = { INI_OK, text, NULL };
     iniopts_t opts = ini__set_default_opts(options);
     // add root table
     initable_t root = { CDECL(inistrv_t){ "root", 4 }, NULL };
@@ -440,7 +476,9 @@ static ini_t ini__parse_internal(char *text, size_t textlen, const iniopts_t *op
 }
 
 static char *ini__read_whole_file(FILE *fp, size_t *filelen) {
-    if (!fp) return NULL;
+    if (!fp) {
+        return NULL;
+    }
     fseek(fp, 0, SEEK_END);
     size_t len = (size_t)ftell(fp);
     fseek(fp, 0, SEEK_SET);
@@ -475,9 +513,9 @@ static iniopts_t ini__set_default_opts(const iniopts_t *options) {
 
 static initable_t *ini__find_table(ini_t *ctx, inistrv_t name) {
     if (strv__is_empty(name)) return NULL;
-    for (unsigned int i = 0; i < ivec_len(ctx->tables); ++i) {
-        if (strv__cmp(ctx->tables[i].name, name) == 0) {
-            return ctx->tables + i;
+    ivec_foreach(initable_t, tab, ctx->tables) {
+        if (strv__cmp(tab->name, name) == 0) {
+            return tab;
         }
     }
     return NULL;
@@ -485,9 +523,9 @@ static initable_t *ini__find_table(ini_t *ctx, inistrv_t name) {
 
 static inivalue_t *ini__find_value(initable_t *table, inistrv_t key) {
     if (strv__is_empty(key)) return NULL;
-    for (unsigned int i = 0; i < ivec_len(table->values); ++i) {
-        if (strv__cmp(table->values[i].key, key) == 0) {
-            return table->values + i;
+    ivec_foreach(inivalue_t, val, table->values) {
+        if (strv__cmp(val->key, key) == 0) {
+            return val;
         }
     }
     return NULL;
@@ -591,7 +629,7 @@ static int ini__rem_escaped(inistrv_t value, char *buf, size_t buflen) {
     if (dest_pos >= buflen) return INI_BUFFER_TOO_SMALL;
     buf[dest_pos++] = value.buf[len];
     buf[dest_pos] = '\0';
-    return dest_pos;
+    return (int)dest_pos;
 }
 
 static ini__istream_t istr__init(const char *str, size_t len) {
@@ -660,6 +698,8 @@ static int strv__cmp(inistrv_t a, inistrv_t b) {
     if(a.len > b.len) return  1;
     return memcmp(a.buf, b.buf, a.len);
 }
+
+#undef INI_ERR
 
 #endif
 
